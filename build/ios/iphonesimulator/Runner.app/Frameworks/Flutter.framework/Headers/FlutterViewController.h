@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef FLUTTER_FLUTTERVIEWCONTROLLER_H_
-#define FLUTTER_FLUTTERVIEWCONTROLLER_H_
+#ifndef FLUTTER_SHELL_PLATFORM_DARWIN_IOS_FRAMEWORK_HEADERS_FLUTTERVIEWCONTROLLER_H_
+#define FLUTTER_SHELL_PLATFORM_DARWIN_IOS_FRAMEWORK_HEADERS_FLUTTERVIEWCONTROLLER_H_
 
 #import <UIKit/UIKit.h>
 #include <sys/cdefs.h>
@@ -11,6 +11,7 @@
 #import "FlutterBinaryMessenger.h"
 #import "FlutterDartProject.h"
 #import "FlutterEngine.h"
+#import "FlutterHourFormat.h"
 #import "FlutterMacros.h"
 #import "FlutterPlugin.h"
 #import "FlutterTexture.h"
@@ -26,6 +27,7 @@ NS_ASSUME_NONNULL_BEGIN
  * with the update.
  */
 FLUTTER_DARWIN_EXPORT
+// NOLINTNEXTLINE(readability-identifier-naming)
 extern NSNotificationName const FlutterSemanticsUpdateNotification;
 
 /**
@@ -40,7 +42,7 @@ extern NSNotificationName const FlutterSemanticsUpdateNotification;
  * used to implicitly spin up a new `FlutterEngine`. Creating a `FlutterEngine` before showing a
  * FlutterViewController can be used to pre-initialize the Dart VM and to prepare the isolate in
  * order to reduce the latency to the first rendered frame. See
- * https://flutter.dev/docs/development/add-to-app/performance for more details on loading
+ * https://docs.flutter.dev/development/add-to-app/performance for more details on loading
  * latency.
  *
  * Holding a `FlutterEngine` independently of FlutterViewControllers can also be used to not to lose
@@ -50,7 +52,7 @@ extern NSNotificationName const FlutterSemanticsUpdateNotification;
 FLUTTER_DARWIN_EXPORT
 #ifdef __IPHONE_13_4
 @interface FlutterViewController
-    : UIViewController <FlutterTextureRegistry, FlutterPluginRegistry, UIPointerInteractionDelegate>
+    : UIViewController <FlutterTextureRegistry, FlutterPluginRegistry, UIGestureRecognizerDelegate>
 #else
 @interface FlutterViewController : UIViewController <FlutterTextureRegistry, FlutterPluginRegistry>
 #endif
@@ -180,6 +182,14 @@ FLUTTER_DARWIN_EXPORT
 - (id<FlutterPluginRegistry>)pluginRegistry;
 
 /**
+ * A wrapper around UIAccessibilityIsVoiceOverRunning().
+ *
+ * As a C function, UIAccessibilityIsVoiceOverRunning() cannot be mocked in testing. Mock
+ * this class method to testing features depends on UIAccessibilityIsVoiceOverRunning().
+ */
++ (BOOL)isUIAccessibilityIsVoiceOverRunning;
+
+/**
  * True if at least one frame has rendered and the ViewController has appeared.
  *
  * This property is reset to false when the ViewController disappears. It is
@@ -189,14 +199,16 @@ FLUTTER_DARWIN_EXPORT
 
 /**
  * Specifies the view to use as a splash screen. Flutter's rendering is asynchronous, so the first
- * frame rendered by the Flutter application might not immediately appear when theFlutter view is
+ * frame rendered by the Flutter application might not immediately appear when the Flutter view is
  * initially placed in the view hierarchy. The splash screen view will be used as
  * a replacement until the first frame is rendered.
  *
  * The view used should be appropriate for multiple sizes; an autoresizing mask to
  * have a flexible width and height will be applied automatically.
+ *
+ * Set to nil to remove the splash screen view.
  */
-@property(strong, nonatomic) UIView* splashScreenView;
+@property(strong, nonatomic, nullable) UIView* splashScreenView;
 
 /**
  * Attempts to set the `splashScreenView` property from the `UILaunchStoryboardName` from the
@@ -221,7 +233,7 @@ FLUTTER_DARWIN_EXPORT
  * `FlutterViewController` is initialized with or a new `FlutterEngine` implicitly created if
  * no engine was supplied during initialization.
  */
-@property(weak, nonatomic, readonly) FlutterEngine* engine;
+@property(nonatomic, readonly) FlutterEngine* engine;
 
 /**
  * The `FlutterBinaryMessenger` associated with this FlutterViewController (used for communicating
@@ -242,8 +254,21 @@ FLUTTER_DARWIN_EXPORT
  */
 @property(nonatomic, readonly) BOOL engineAllowHeadlessExecution;
 
+/**
+ * Controls whether the created view can be sized based on its content.
+ * When set to `YES`, the FlutterView will be the same size as the outermost widget.
+ * Cannot be used with unbounded height widgets, such as Scaffold.
+ * This property is intended to be used with Add-to-App scenarios.
+ *
+ * Once auto resizing is enabled, the FlutterView will rely on custom constraints from then on.
+ * Avoid disabling it after enabling, as behaviour will then be undefined.
+ *
+ * Default is `NO`.
+ */
+@property(nonatomic, getter=isAutoResizable) BOOL autoResizable;
+
 @end
 
 NS_ASSUME_NONNULL_END
 
-#endif  // FLUTTER_FLUTTERVIEWCONTROLLER_H_
+#endif  // FLUTTER_SHELL_PLATFORM_DARWIN_IOS_FRAMEWORK_HEADERS_FLUTTERVIEWCONTROLLER_H_

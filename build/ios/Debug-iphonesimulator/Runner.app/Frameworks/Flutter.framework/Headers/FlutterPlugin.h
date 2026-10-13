@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef FLUTTER_FLUTTERPLUGIN_H_
-#define FLUTTER_FLUTTERPLUGIN_H_
+#ifndef FLUTTER_SHELL_PLATFORM_DARWIN_IOS_FRAMEWORK_HEADERS_FLUTTERPLUGIN_H_
+#define FLUTTER_SHELL_PLATFORM_DARWIN_IOS_FRAMEWORK_HEADERS_FLUTTERPLUGIN_H_
 
 #import <UIKit/UIKit.h>
 #import <UserNotifications/UNUserNotificationCenter.h>
@@ -12,6 +12,7 @@
 #import "FlutterChannels.h"
 #import "FlutterCodecs.h"
 #import "FlutterPlatformViews.h"
+#import "FlutterSceneLifeCycle.h"
 #import "FlutterTexture.h"
 
 NS_ASSUME_NONNULL_BEGIN
@@ -22,15 +23,13 @@ NS_ASSUME_NONNULL_BEGIN
 /**
  * Protocol for listener of events from the UIApplication, typically a FlutterPlugin.
  */
-@protocol FlutterApplicationLifeCycleDelegate
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_10_0
-    <UNUserNotificationCenterDelegate>
-#endif
+@protocol FlutterApplicationLifeCycleDelegate <UNUserNotificationCenterDelegate>
+
 @optional
 /**
  * Called if this has been registered for `UIApplicationDelegate` callbacks.
  *
- * @return `NO` if this vetoes application launch.
+ * @return `NO` if this vetos application launch.
  */
 - (BOOL)application:(UIApplication*)application
     didFinishLaunchingWithOptions:(NSDictionary*)launchOptions;
@@ -38,7 +37,7 @@ NS_ASSUME_NONNULL_BEGIN
 /**
  * Called if this has been registered for `UIApplicationDelegate` callbacks.
  *
- * @return `NO` if this vetoes application launch.
+ * @return `NO` if this vetos application launch.
  */
 - (BOOL)application:(UIApplication*)application
     willFinishLaunchingWithOptions:(NSDictionary*)launchOptions;
@@ -82,6 +81,12 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (void)application:(UIApplication*)application
     didRegisterForRemoteNotificationsWithDeviceToken:(NSData*)deviceToken;
+
+/**
+ * Called if this has been registered for `UIApplicationDelegate` callbacks.
+ */
+- (void)application:(UIApplication*)application
+    didFailToRegisterForRemoteNotificationsWithError:(NSError*)error;
 
 /**
  * Called if this has been registered for `UIApplicationDelegate` callbacks.
@@ -246,38 +251,46 @@ typedef void (*FlutterPluginRegistrantCallback)(NSObject<FlutterPluginRegistry>*
  * Flutter Framework (e.g. When an interact-able widget is covering the platform view).
  */
 typedef enum {
+  // NOLINTBEGIN(readability-identifier-naming)
   /**
    * Flutter blocks all the UIGestureRecognizers on the platform view as soon as it
    * decides they should be blocked.
    *
-   * With this policy, only the `touchesBegan` method for all the UIGestureRecognizers is guaranteed
-   * to be called.
+   * This policy employs a dual blocking strategy: synchronous blocking via hitTest results and
+   * asynchronous blocking managed through the framework’s gesture arena. With this policy, only the
+   * `touchesBegan` method for all the UIGestureRecognizers is guaranteed to be called.
    */
   FlutterPlatformViewGestureRecognizersBlockingPolicyEager,
   /**
-   * Flutter blocks the platform view's UIGestureRecognizers from recognizing only after
-   * touchesEnded was invoked.
+   * Flutter blocks all the UIGestureRecognizers on the platform view only after touchesEnded was
+   * invoked.
    *
    * This results in the platform view's UIGestureRecognizers seeing the entire touch sequence,
    * but never recognizing the gesture (and never invoking actions).
    */
   FlutterPlatformViewGestureRecognizersBlockingPolicyWaitUntilTouchesEnded,
+  /**
+   * Flutter blocks all the UIGestureRecognizers on the platform view based on results from hitTest.
+   *
+   * Unlike FlutterPlatformViewGestureRecognizersBlockingPolicyEager, this policy does not rely on
+   * Flutter's gesture arena. This is a workaround to address a few bugs related to platform view's
+   * gesture recognizers being stuck in a stale state. See:
+   * https://github.com/flutter/flutter/issues/175099.
+   */
+  FlutterPlatformViewGestureRecognizersBlockingPolicyDoNotBlockGesture,
+  // NOLINTEND(readability-identifier-naming)
 } FlutterPlatformViewGestureRecognizersBlockingPolicy;
 
 #pragma mark -
 /**
- * Registration context for a single `FlutterPlugin`, providing a one stop shop
- * for the plugin to access contextual information and register callbacks for
- * various application events.
+ * The base interface for `FlutterPluginRegistrar` and `FlutterApplicationRegistrar`.
  *
- * Registrars are obtained from a `FlutterPluginRegistry` which keeps track of
- * the identity of registered plugins and provides basic support for cross-plugin
- * coordination.
+ * Provides registration context for the application or plugins.
  */
-@protocol FlutterPluginRegistrar <NSObject>
+@protocol FlutterBaseRegistrar <NSObject>
 /**
  * Returns a `FlutterBinaryMessenger` for creating Dart/iOS communication
- * channels to be used by the plugin.
+ * channels to be used by the application or a plugin.
  *
  * @return The messenger.
  */
@@ -285,7 +298,7 @@ typedef enum {
 
 /**
  * Returns a `FlutterTextureRegistry` for registering textures
- * provided by the plugin.
+ * provided by the application or a plugin.
  *
  * @return The texture registry.
  */
@@ -294,7 +307,8 @@ typedef enum {
 /**
  * Registers a `FlutterPlatformViewFactory` for creation of platform views.
  *
- * Plugins expose `UIView` for embedding in Flutter apps by registering a view factory.
+ * Applications or plugins can expose `UIView` for embedding in Flutter apps by registering a view
+ * factory.
  *
  * @param factory The view factory that will be registered.
  * @param factoryId A unique identifier for the factory, the Dart code of the Flutter app can use
@@ -306,7 +320,8 @@ typedef enum {
 /**
  * Registers a `FlutterPlatformViewFactory` for creation of platform views.
  *
- * Plugins can expose a `UIView` for embedding in Flutter apps by registering a view factory.
+ * Applications or plugins can expose a `UIView` for embedding in Flutter apps by registering a view
+ * factory.
  *
  * @param factory The view factory that will be registered.
  * @param factoryId A unique identifier for the factory, the Dart code of the Flutter app can use
@@ -319,6 +334,43 @@ typedef enum {
                               withId:(NSString*)factoryId
     gestureRecognizersBlockingPolicy:
         (FlutterPlatformViewGestureRecognizersBlockingPolicy)gestureRecognizersBlockingPolicy;
+@end
+
+/**
+ * A registrar for Flutter applications.
+ *
+ * This registrar provides access to application-level services, such as the binary messenger and
+ * texture registry.
+ *
+ * See also `FlutterBaseRegistrar`.
+ */
+@protocol FlutterApplicationRegistrar <FlutterBaseRegistrar>
+@end
+
+/**
+ * Registration context for a single `FlutterPlugin`, providing a one stop shop
+ * for the plugin to access contextual information and register callbacks for
+ * various application events.
+ *
+ * Registrars are obtained from a `FlutterPluginRegistry` which keeps track of
+ * the identity of registered plugins and provides basic support for cross-plugin
+ * coordination.
+ */
+@protocol FlutterPluginRegistrar <FlutterBaseRegistrar>
+
+/**
+ * The `UIViewController` whose view is displaying Flutter content.
+ *
+ * The plugin typically should not store a strong reference to this view
+ * controller.
+ *
+ * This property is provided for backwards compatibility for apps that assume
+ * a single view, and will eventually be replaced by the multi-view API variant.
+ *
+ * This property may be |nil|, for instance in a headless environment, or when
+ * the underlying Flutter engine is deallocated.
+ */
+@property(nullable, readonly) UIViewController* viewController;
 
 /**
  * Publishes a value for external use of the plugin.
@@ -349,7 +401,16 @@ typedef enum {
  *
  * @param delegate The receiving object, such as the plugin's main class.
  */
-- (void)addApplicationDelegate:(NSObject<FlutterPlugin>*)delegate;
+- (void)addApplicationDelegate:(NSObject<FlutterPlugin>*)delegate
+    NS_EXTENSION_UNAVAILABLE_IOS("Disallowed in plugins used in app extensions");
+
+/**
+ * Registers the plugin as a receiver of `UISceneDelegate` and `UIWindowSceneDelegate` calls.
+ *
+ * @param delegate The receiving object, such as the plugin's main class.
+ */
+- (void)addSceneDelegate:(NSObject<FlutterSceneLifeCycleDelegate>*)delegate
+    API_AVAILABLE(ios(13.0));
 
 /**
  * Returns the file name for the given asset.
@@ -370,6 +431,16 @@ typedef enum {
  * @return the file name to be used for lookup in the main bundle.
  */
 - (NSString*)lookupKeyForAsset:(NSString*)asset fromPackage:(NSString*)package;
+
+/**
+ * Returns a value published by the specified plugin.
+ *
+ * @param pluginKey The unique key identifying the plugin.
+ * @return An object published by the plugin, if any. Will be `NSNull` if
+ *   nothing has been published. Will be `nil` if the plugin has not been
+ *   registered.
+ */
+- (nullable NSObject*)valuePublishedByPlugin:(NSString*)pluginKey;
 @end
 
 #pragma mark -
@@ -420,16 +491,34 @@ typedef enum {
 
 #pragma mark -
 /**
+ * The target of registration of plugins.
+ *
+ * This often is hooked up to the GeneratedPluginRegistrant which is
+ * automatically generated by Flutter for the dependencies listed in the
+ * project.
+ */
+@protocol FlutterPluginRegistrant <NSObject>
+@required
+/**
+ * Register all the plugins for the registrant.
+ *
+ * This will be called after a FlutterEngine has been instantiated, the registry
+ * will connect any plugins to that engine.
+ *
+ * @param registry The registry where plugins will be registered.
+ */
+- (void)registerWithRegistry:(NSObject<FlutterPluginRegistry>*)registry;
+@end
+
+#pragma mark -
+/**
  * Implement this in the `UIAppDelegate` of your app to enable Flutter plugins to register
  * themselves to the application life cycle events.
  *
  * For plugins to receive events from `UNUserNotificationCenter`, register this as the
  * `UNUserNotificationCenterDelegate`.
  */
-@protocol FlutterAppLifeCycleProvider
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_10_0
-    <UNUserNotificationCenterDelegate>
-#endif
+@protocol FlutterAppLifeCycleProvider <UNUserNotificationCenterDelegate>
 
 /**
  * Called when registering a new `FlutterApplicaitonLifeCycleDelegate`.
@@ -441,4 +530,4 @@ typedef enum {
 
 NS_ASSUME_NONNULL_END
 
-#endif  // FLUTTER_FLUTTERPLUGIN_H_
+#endif  // FLUTTER_SHELL_PLATFORM_DARWIN_IOS_FRAMEWORK_HEADERS_FLUTTERPLUGIN_H_
